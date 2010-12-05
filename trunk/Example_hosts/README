@@ -1,0 +1,8 @@
+Here examples for linux and java platform.
+
+controller_linux.c is simple application written in C. Which send
+message to bluetooth device and reads the answer what that device writes.
+
+
+controller_phone.java is also simple application written in Java. This
+will send message to bt device and reads the outcome.
