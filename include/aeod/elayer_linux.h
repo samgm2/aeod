@@ -1,6 +1,10 @@
 /*
  * hciattach -n -s 115200 /dev/ttyUSB0 csr 115200 noflow
  */
+#ifndef __ELAYER_H
+#define __ELAYER_H									1
+#define __ELAYER_LINUX								1
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -8,10 +12,6 @@
 #include <sys/signal.h>
 #include <sys/types.h>
 #include <termios.h>
-
-#ifndef __ELAYER_H
-#define __ELAYER_H									1
-#define __ELAYER_AVR								1
 
 #ifndef u8
 	typedef unsigned char							u8;
@@ -63,6 +63,10 @@ char elayer_read(struct elayer *ctx,u8 *byte) {
 		return 1;
 	}*/
 	return 0;
+}
+
+void elayer_hwreset(struct elayer *ctx) {
+	
 }
 
 void elayer_init(struct elayer *ctx) {

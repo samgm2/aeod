@@ -44,23 +44,23 @@ struct aedin {
 		/* harware send and rec layer */
 	struct elayer					layer;
 		/* Internal flags */
-	volatile u8						flags;
+	 u8						flags;
 		/* allways packet type */
-	volatile u8						type;
+	 u8						type;
 		/* either when type is:
 		 * -> cmd, ident is opcode
 		 * -> data, ident is connection handle
 		 * -> event, ident is event code */
-	volatile u16					ident;
+	 u16					ident;
 	
 	
 		/* buff where len point */
-	volatile u8						buff[AEDIN_BUFF];
+	 u8						buff[AEDIN_BUFF];
 		/* parameter len, can't exeed AEDIN_BUFF */
-	volatile u16					len;
+	 u16					len;
 		/* cnt for all received data */
-	volatile u16					cnt_virt;
-	volatile u16					cnt_real;
+	 u16					cnt_virt;
+	 u16					cnt_real;
 };
 
 	/* Reset state */
@@ -74,11 +74,12 @@ void aedin_reset(struct aedin *ctx) {
 
 	/* This just initialize the struct, all null */
 void aedin_init(struct aedin *ctx) {
-	aedin_reset(ctx);
 	elayer_init(&ctx->layer);
+	aedin_reset(ctx);
 }
 
-	/* Perform close stuff ? */
+	/* Perform close stuff ?
+	 * - meaningless only for linux */
 void aedin_free(struct aedin *ctx) {
 	elayer_free(&ctx->layer);
 }
@@ -106,11 +107,11 @@ u8 aedin_receive(struct aedin *ctx) {
 		aedin_reset(ctx);
 	}
 	
-		/* Read until there is no bytes left */
 	if (elayer_read(&ctx->layer,&byte)) {
 /*		printf("AEDIN: recv all:%d real:%d 0x%X\n",ctx->cnt_virt,ctx->cnt_real,byte);*/
 
-
+			/* This block only collects data,
+			 *  type and packet len must be declared */
 		if ((ctx->type != 0) && (ctx->len != 0)) {
 				/* Allways increase virtual pointer */
 			ctx->cnt_virt ++;
@@ -131,10 +132,15 @@ u8 aedin_receive(struct aedin *ctx) {
 			/* Tell header packet byte */
 		ctx->cnt_real ++;
 		
+		
+			/* pakcet type and len is not yet declared */
 		switch(ctx->type) {
 			case 0:
-					/* Check if type of packet is correct */
+					/* Check if type of packet is correct
+					 * this is first received byte */
 				switch (byte) {
+					
+						/* Theese are types regognized */
 					case AEDIN_H4_CMD:
 					case AEDIN_H4_ACL:
 					case AEDIN_H4_SCO:
@@ -143,6 +149,7 @@ u8 aedin_receive(struct aedin *ctx) {
 						ctx->len = 0;
 					break;
 					
+						/* By default reset all */
 					default:
 						aedin_reset(ctx);
 					break;
@@ -153,26 +160,26 @@ u8 aedin_receive(struct aedin *ctx) {
 			case AEDIN_H4_EVENT:
 				switch (ctx->cnt_real) {
 					case 2:
+							/* this is event code */
 						ctx->ident = byte;
 					break;
 
 					case 3:
+							/* Zero counters */
 						ctx->cnt_virt = 0;
 						ctx->cnt_real = 0;
-						ctx->len = 0;
+						
+						ctx->len = byte;
 						
 							/* IF events have no params, this packet is ready then */
-						if (byte == 0) {
+						if (ctx->len == 0) {
 							ctx->flags |= AEDIN_FLAGS_READY;
 							return 1;
 						}
-						ctx->len = byte;
 					break;
 					
+						/* Should not happen */
 					default:
-						ctx->type = 0;
-						ctx->cnt_virt = 0;
-						ctx->cnt_real = 0;
 					break;
 				}
 			break;
@@ -182,6 +189,7 @@ u8 aedin_receive(struct aedin *ctx) {
 			case AEDIN_H4_SCO:
 				switch (ctx->cnt_real) {
 					case 2:
+							/* This is lower byte of HCI data packets "connection handle" */
 						ctx->ident = byte;
 					break;
 					
@@ -189,7 +197,7 @@ u8 aedin_receive(struct aedin *ctx) {
 							/* Set hi byte for connetion handle, this 3 bytes  */
 						ctx->ident |= (((u16)byte << 8) & 0x0F00);
 						
-							/* Hi 4 bytes are reserved for internal use */
+							/* Hi 4 bytes are reserved for internal use, so clr lower 4 */
 						ctx->flags &= 0xF0;
 						
 							/* Lo 4 bits are flags 
@@ -200,27 +208,28 @@ u8 aedin_receive(struct aedin *ctx) {
 					break;
 					
 					case 4:
+							/* If SCO, this is litle smaller than ACL */
 						if (ctx->type == AEDIN_H4_SCO) {
 							ctx->cnt_virt = 0;
 							ctx->cnt_real = 0;
-							ctx->len = 0;
+							ctx->len = byte;
 
-							if (byte == 0) {
+							if (ctx->len == 0) {
 								ctx->flags |= AEDIN_FLAGS_READY;
 								return 1;
 							}
-							ctx->len = byte;
 							return 0;
 						}
+							/* Must store byte for len */
 						ctx->buff[0] = byte;
 					break;
 					
 					case 5:
 						ctx->cnt_virt = 0;
 						ctx->cnt_real = 0;
-						ctx->len = 0;
-
-						ctx->len = ctx->buff[0] | ((u16)byte << 8);
+						ctx->len = (u16)ctx->buff[0] | ((u16)byte << 8);
+						
+						
 						if (ctx->len == 0) {
 							ctx->flags |= AEDIN_FLAGS_READY;
 							return 1;
@@ -228,9 +237,6 @@ u8 aedin_receive(struct aedin *ctx) {
 					break;
 					
 					default:
-						ctx->type = 0;
-						ctx->cnt_virt = 0;
-						ctx->cnt_real = 0;
 					break;
 				}
 			break;
