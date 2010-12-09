@@ -1,7 +1,7 @@
 /*
  * This is avr version of elayer
- * 
- * Fuse low: 0xE7
+ * Please keep thoos _p nad _i as a volatile, else there is 
+ * problem with interrupts and compiler.
  * 
  */
 
@@ -31,39 +31,9 @@
 #define ELAYER_RECV_BUFF							4
 
 
-	/* Not needed */
-struct elayer {
-};
-
-
-struct elayer_avr_initial {
-		/* Receive buffer */
-	u8 rec_buff[ELAYER_RECV_BUFF];
-		/* Poister which poits current FREE slot */
-	volatile u8 rec_p;
-		/* Poister which points current getter byte */
-	volatile u8 rec_i;
-	
-	
-	
-	u8 txt_buff[ELAYER_TXT_BUFF];
-		/* Poister which poits current FREE slot */
-	volatile u8 txt_p;
-		/* Pointer which points current getter */
-	volatile u8 txt_i;
-} gl_elayer;
-
-
 void tiks(u8 i) {
 	volatile u8 n;
 	for (n = 0;n < i;n ++);
-}
-
-void usleep(u8 i) {
-	volatile u8 n;
-	for (n = 0;n < i;n ++) {
-		tiks(255);
-	}
 }
 
 	/* miliseconds */
@@ -101,12 +71,47 @@ void elayer_error(u8 ecode) {
 	}
 }
 
+	/* Not needed */
+struct elayer {
+	
+};
+
+
+struct elayer_avr_initial {
+		/* Receive buffer */
+	u8 rec_buff[ELAYER_RECV_BUFF];
+		/* Poister which poits current FREE slot */
+	volatile u8 rec_p;
+		/* Poister which points current getter byte */
+	volatile u8 rec_i;
+	
+	
+	
+	u8 txt_buff[ELAYER_TXT_BUFF];
+		/* Poister which poits current FREE slot */
+	volatile u8 txt_p;
+		/* Pointer which points current getter */
+	volatile u8 txt_i;
+} gl_elayer;
+
+#define ELAYER_CTS_DDR								DDRD
+#define ELAYER_CTS_PIN								PIND
+#define ELAYER_CTS_PORT								PORTD
+#define ELAYER_CTS_BIT								0x10
+#define ELAYER_CTS									(ELAYER_CTS_PIN & ELAYER_CTS_BIT)
+
+#define ELAYER_RTS_DDR								DDRD
+#define ELAYER_RTS_PIN								PIND
+#define ELAYER_RTS_PORT								PORTD
+#define ELAYER_RTS_BIT								0x08
+#define ELAYER_RTS									(ELAYER_RTS_PIN & ELAYER_RTS_BIT)
+
 
 ISR(USART_UDRE_vect) {
 	if (gl_elayer.txt_i != gl_elayer.txt_p) {
 		
 			/* Nasty way to spin */
-		if (PIND & 0x10) return;
+		if (ELAYER_CTS) return;
 		
 		UDR0 = gl_elayer.txt_buff[gl_elayer.txt_p];
 		if (gl_elayer.txt_p >= (ELAYER_TXT_BUFF - 1)) gl_elayer.txt_p = 0;
@@ -146,7 +151,7 @@ ISR(USART_RX_vect) {
 	
 	
 		/* RTS UP */
-	PORTD |= 0x08;
+	ELAYER_RTS_PORT |= ELAYER_RTS_BIT;
 
 	gl_elayer.rec_buff[gl_elayer.rec_p] = UDR0;
 	if (gl_elayer.rec_p >= (ELAYER_RECV_BUFF - 1)) {
@@ -174,11 +179,11 @@ u8 elayer_read(struct elayer *ctx,u8 *byte) {
 		}
 		
 			/* RTS down */
-		PORTD &= 255 ^ 0x08;
+		ELAYER_RTS_PORT &= 255 ^ ELAYER_RTS_BIT;
 		return 1;
 	}
 		/* RTS down */
-	PORTD &= 255 ^ 0x08;
+	ELAYER_RTS_PORT &= 255 ^ ELAYER_RTS_BIT;
 	return 0;
 }
 
@@ -198,7 +203,7 @@ void elayer_hwreset(struct elayer *ctx) {
 
 	
 		/* RTS down */
-	PORTD &= 255 ^ 0x08;
+	ELAYER_RTS_PORT &= 255 ^ ELAYER_RTS_BIT;
 		/* BT-chip is in reset state */
 	PORTD |= 0x04;
 
@@ -234,12 +239,12 @@ char elayer_init_port(struct elayer *ctx) {
 	DDRD |= 0x02;
 	
 		/* RTS */
-	PORTD |= 0x08;
-	DDRD |= 0x08;
+	ELAYER_RTS_DDR |= ELAYER_RTS_BIT;
+	ELAYER_RTS_PORT |= ELAYER_RTS_BIT;
 	
 		/* CTS */
-	DDRD &= 0x10 ^ 255;
-	PORTD &= 0x10 ^ 255;
+	ELAYER_CTS_DDR &= ELAYER_CTS_BIT ^ 255;
+	ELAYER_CTS_PORT &= ELAYER_CTS_BIT ^ 255;
 	
 	
 	UCSR0A = 0x02;		/* Double speed  */
@@ -262,8 +267,7 @@ void elayer_init(struct elayer *ctx) {
 }
 
 
-void elayer_free(struct elayer *ctx) {
-}
+void elayer_free(struct elayer *ctx) {}
 
 
 #endif /* __ELAYER_H */

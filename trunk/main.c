@@ -22,6 +22,7 @@ void main(void) {
 	while(1) {
 		wdt_reset();
 		
+		
 			/* Read data send by some .... stuff */
 		if ((len = aeod_acl_read(&bt,buff,16))) {
 				/* Example reply to Hello */

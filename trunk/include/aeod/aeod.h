@@ -54,6 +54,7 @@
 	/* Initialization in phase */
 #define AEOD_FLAGS_INITIALIZE_PHASE				0x04
 
+#define AEOD_RESET_HANDLE						0xFFFF
 
 
 struct aeod {
@@ -147,11 +148,14 @@ u8 aeod_acl_write(struct aeod *ctx,void *vdata,u8 header_len,u8 data_len) {
 	u8 *data = vdata;
 	
 		/* No connection */
-	if (ctx->handle == 0) return 0;
+	if (ctx->handle == AEOD_RESET_HANDLE) return 0;
 		
+			/* Send connectionless packet */
 	if (ctx->channel == 0x0002) {
 		aeod_acl_send(ctx,ctx->handle,ctx->channel,ctx->psm,data,header_len,data_len);
 	} else {
+		/* Connection oriented */
+		
 #ifdef AEOD_CONNECTION_ORIENTED_CHANNEL
 		u16 psm_field = 0;
 		u8 *ndata;
@@ -189,7 +193,7 @@ void aeod_disconnect(struct aeod *ctx,u16 handle) {
 
 	/* Return 1 if is connected to someone */
 u8 aeod_connected(struct aeod *ctx) {
-	if (ctx->handle == 0) return 0;
+	if (ctx->handle == AEOD_RESET_HANDLE) return 0;
 	return 1;
 }
 
@@ -209,11 +213,18 @@ void aeod_handle_event(struct aeod *ctx) {
 		case AEOD_EVENT_NUMBER_OF_COMPLETED_PACKETS:
 			
 /*			printf("    Conpleted:%d handle:%d num:%d\n",ctx->trans.buff[0],((u16*)&ctx->trans.buff[1])[0],((u16*)&ctx->trans.buff[3])[0]);*/
+
 				/* This just assume all is okay. */
 			ctx->flags &= 255 ^ AEOD_FLAGS_TRANFER;
 		break;
 
 		case AEOD_EVENT_COMMAND_STATUS:
+			/*
+				1B: Status,
+				1B: Num_HCI_Command_Packets,
+				2B: Command_Opcode
+			 * 
+			 */
 			switch(((u16*)(&ctx->trans.buff[2]))[0]) {
 				case AEOD_UNKNOWN_OP:
 					/* This is possible for csr chip with happens to have hw reset. */
@@ -234,6 +245,14 @@ void aeod_handle_event(struct aeod *ctx) {
 /*			printf("    Repetition to:0x%X\n",ctx->trans.buff[9]);*/
 		break;
 		
+		
+			/*
+			1B: Status,
+			2B: Connection_Handle,
+			6B: BD_ADDR,
+			1B: Link_Type,
+			1B: Encryption_Mode
+			 */		
 		case AOED_EVENT_CONNECTION_COMPLETE:
 				/* Connection did not to be created. */
 			if (ctx->trans.buff[0] != 0) return;
@@ -243,12 +262,7 @@ void aeod_handle_event(struct aeod *ctx) {
 				aeod_disconnect(ctx,((u16*)&ctx->trans.payload[1])[0] & 0x0FFF);
 				return 1;
 			}*/
-			ctx->handle = ((u16*)&ctx->trans.buff[1])[0] & 0x0FFF;
-			
-				/* Connection type
-				 * ctx->trans.buff[7];
-				 * 
-				 *  */
+			ctx->handle = ((u16*)&ctx->trans.buff[1])[0] & 0x0EFF;
 /*			printf("    Got connection handle:%d type:0x%X encryption:0x%X\n",ctx->handle,ctx->trans.buff[9],ctx->trans.buff[10]);*/
 			
 /*
@@ -266,7 +280,7 @@ void aeod_handle_event(struct aeod *ctx) {
 		case AEOD_EVENT_DISCONNECTION_COMPLETE:
 				/* Disconnection complete */
 			if (ctx->trans.buff[0] == 0) {
-				ctx->handle = 0;
+				ctx->handle = AEOD_RESET_HANDLE;
 			}
 		break;
 		
@@ -295,7 +309,8 @@ void aeod_handle_event(struct aeod *ctx) {
 }
 
 
-	/*  */
+	/* Handle L2CAP signalling
+	 * - just smile and say ok to everything */
 void aeod_handle_l2cap_signal(struct aeod *ctx) {
 #ifdef AEOD_CONNECTION_ORIENTED_CHANNEL
 	struct aeod_l2cap_conreq *rec;
@@ -332,6 +347,7 @@ void aeod_handle_l2cap_signal(struct aeod *ctx) {
 	
 	if (rec->code == 0x02) {
 		
+			/* Save PSM */
 		ctx->psm = rec->psm;
 			/* Code and identifier */
 		psm = 0x03 | ((u16)rec->ident << 8);
@@ -374,47 +390,46 @@ void aeod_handle_l2cap_signal(struct aeod *ctx) {
 u8 aeod_handle_acl(struct aeod *ctx,void *vdata,u8 len) {
 	u8 i,s;
 	u8 *b;
-	u16 *p;
 
-	p = (u16*)&ctx->trans.buff;
 	
-	/* p = L2CAP Packet see BT1.1, S 280, Figure 4.1: L2CAP Packet (field sizes in bits)
-	 * p[0] = len
-	 * p[1] = channel
-	 * p[2] = info
+	/* L2CAP Packet see BT1.1, S 280, Figure 4.1: L2CAP Packet (field sizes in bits)
+	 * B2: len
+	 * B2: channel
+	 * B2: info
 	 * 
-	 * -in CONNECTION-ORIENTED packet, data begins directly from info.
-	 * -in CONNECTIONLESS packet, data begins after psm, which is 2-bytes long and is before data.
-	 * Thereforce CONNECTIONLESS packet data portion begin in p[3].
-	 * 
+	 * -in CONNECTION-ORIENTED packet, data begins directly from info
+	 * -in CONNECTIONLESS packet, data begins after psm, which is 2-bytes long
 	 */
 	
-/*	Not really needed
- * ctx->len = p[0];*/
-	ctx->channel = p[1];
+		/* Len of packet */
+/*	ctx->len = ((u16*)&ctx->trans.buff[0])[0];*/
+		/* Channel */
+	ctx->channel = ((u16*)&ctx->trans.buff[2])[0];
+		/* Maybe PSM + info or info */
+/*	ctx->info = ((u16*)&ctx->trans.buff[4])[0];*/
 	
 	if (ctx->channel == 0x0001) {
 		/* if you want L2CAP signalling, then finnish this */
 		aeod_handle_l2cap_signal(ctx);
 		return 0;
 	}
-
-		/* By default, assume CONNECTION-ORIENTED CHANNEL  */
-	b = (u8*)&p[2];
-	s = ctx->trans.cnt_real - 4;
 	
-		/*  CONNECTIONLESS DATA CHANNEL */
 	if (ctx->channel == 0x0002) {
 			/* Set psm */
-		ctx->psm = p[2];
-			/* NEED IMPLEMENTATION FOR (PSM SIZE) */
-		b = (u8*)&p[3];
+		ctx->psm = ((u16*)&ctx->trans.buff[4])[0];
+			/* This is CONNECTIONLESS CHANNEL  */
+		b = &ctx->trans.buff[6];
+			/* Only interested for tranferred data */
 		s = ctx->trans.cnt_real - 6;
+	} else {
+			/* By default, assume CONNECTION-ORIENTED CHANNEL  */
+		b = &ctx->trans.buff[4];
+			/* Only interested for tranferred data */
+		s = ctx->trans.cnt_real - 4;
 	}
 	
 		/* Copy only up to len */
 	if (s > len) s = len;
-	
 	
 	for (i = 0;i < s;i ++) {
 		((u8*)vdata)[i] = b[i];
@@ -424,6 +439,8 @@ u8 aeod_handle_acl(struct aeod *ctx,void *vdata,u8 len) {
 
 	/* Set state so itshould start init sequence */
 void aeod_handle_status(struct aeod *ctx) {
+	
+	
 	switch(ctx->status) {
 		case 0:
 /*				elayer_hwreset(&ctx->trans.layer);*/
@@ -483,7 +500,7 @@ u8 aeod_acl_read(struct aeod *ctx,void *vdata,u8 len) {
 
 void aeod_init(struct aeod *ctx) {
 	ctx->status = 0;
-	ctx->handle = 0;
+	ctx->handle = AEOD_RESET_HANDLE;
 	ctx->flags = 0;
 	aedin_init(&ctx->trans);
 }
